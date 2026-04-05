@@ -35,10 +35,10 @@ def preprocess(df, feature_names, scaler):
     return pd.DataFrame(scaled, columns=feature_names)
 
 # ----------------------------
-# LOAD MODELS AND FEATURE NAMES FROM R2
+# LOAD MODEL AND SCALER FROM R2
 # ----------------------------
 @st.cache_resource
-def load_assets_from_r2():
+def load_model_and_scaler():
     try:
         R2_ENDPOINT = st.secrets["R2_ENDPOINT_URL"]
         R2_ACCESS_KEY = st.secrets["R2_ACCESS_KEY_ID"]
@@ -60,43 +60,28 @@ def load_assets_from_r2():
         scaler_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/scaler.pkl")
         scaler = joblib.load(BytesIO(scaler_obj["Body"].read()))
 
-        # Load feature names
-        features_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/feature_names.pkl")
-        feature_names = joblib.load(BytesIO(features_obj["Body"].read()))
-
-        # Load metrics (optional)
-        metrics_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/metrics.pkl")
-        metrics = joblib.load(BytesIO(metrics_obj["Body"].read()))
-
-        st.success("Model, scaler, and feature names loaded from R2")
-        return model, scaler, feature_names, metrics, s3, R2_BUCKET
+        st.success("Model and scaler loaded from R2")
+        return model, scaler, s3, R2_BUCKET
 
     except Exception as e:
         st.warning(f"Could not load model assets from R2: {e}")
         st.stop()
 
-model, scaler, feature_names, metrics, s3, R2_BUCKET = load_assets_from_r2()
+model, scaler, s3, R2_BUCKET = load_model_and_scaler()
+feature_names = model.feature_names  # stored in model pickle
 
 # ----------------------------
-# LOAD DEFAULT DATA FROM R2
+# LOAD DEFAULT TEST DATA FROM R2
 # ----------------------------
 @st.cache_data
-def load_default_data_from_r2():
+def load_default_data():
     try:
-        # Get first CSV from data folder
-        objects = s3.list_objects_v2(Bucket=R2_BUCKET, Prefix="data/")
-        file_name = next((obj['Key'] for obj in objects['Contents'] if obj['Key'].endswith('.csv')), None)
-        if file_name is None:
-            raise FileNotFoundError("No CSV file found in data folder.")
-
-        obj = s3.get_object(Bucket=R2_BUCKET, Key=file_name)
-        data_df = pd.read_csv(BytesIO(obj['Body'].read()))
-
-        st.success(f"Dataset loaded from Cloudflare R2: {file_name}")
+        obj = s3.get_object(Bucket=R2_BUCKET, Key="data/churn_test.csv")
+        data_df = pd.read_csv(BytesIO(obj["Body"].read()))
+        st.success("Default test dataset loaded from R2")
         return data_df
-
     except Exception as e:
-        st.warning(f"Could not load dataset from Cloudflare R2: {e}")
+        st.warning(f"Could not load default dataset: {e}")
         st.stop()
 
 # ----------------------------
@@ -106,12 +91,11 @@ st.title("Customer Churn Batch Prediction App")
 st.write("Upload a CSV file or use the default test dataset from Cloudflare R2.")
 
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
-
 if uploaded_file:
     raw_df = pd.read_csv(uploaded_file)
     st.success("Using uploaded dataset")
 else:
-    raw_df = load_default_data_from_r2()
+    raw_df = load_default_data()
     st.info("Using default dataset from R2")
 
 st.subheader("Preview Data")
@@ -123,55 +107,56 @@ st.dataframe(raw_df.head())
 if st.button("Run Prediction"):
     processed_df = preprocess(raw_df, feature_names, scaler)
     
-    # Predictions
     preds = model.predict(processed_df)
     probs = model.predict_proba(processed_df)[:,1]
-    
+
     results = raw_df.copy()
     results["churn_prediction"] = preds
     results["churn_probability"] = probs
-    
+
     st.subheader("Prediction Results")
     st.dataframe(results.head())
-    
-    # ----------------------------
-    # SHAP EXPLAINABILITY
-    # ----------------------------
-    st.subheader("Model Explainability (SHAP)")
 
-    explainer = shap.Explainer(model, processed_df)
-    shap_values = explainer(processed_df)
+    # ----------------------------
+# SHAP EXPLAINABILITY
+# ----------------------------
+st.subheader("Model Explainability (SHAP)")
 
-    fig = plt.figure()
-    shap.plots.beeswarm(shap_values, show=False)
-    st.pyplot(fig)
-    
+processed_df_named = pd.DataFrame(processed_df, columns=feature_names)
+
+# Create SHAP explainer
+explainer = shap.Explainer(model, processed_df_named)
+shap_values = explainer(processed_df_named)
+
+# Plot beeswarm
+fig = plt.figure(figsize=(10,6))
+shap.plots.beeswarm(shap_values, show=False)
+st.pyplot(fig)
+
     # ----------------------------
     # BUSINESS INTERPRETATION
     # ----------------------------
     st.subheader("Top 3 Drivers of Churn")
-    
     shap_importance = np.abs(shap_values.values).mean(axis=0)
     importance_df = pd.DataFrame({
         "feature": feature_names,
         "importance": shap_importance
     }).sort_values(by="importance", ascending=False)
-    
+
     top3 = importance_df.head(3)
-    
     for _, row in top3.iterrows():
-        feature = row["feature"]
-        if "service" in feature.lower():
-            st.warning(f" High customer service interactions ({feature}) are a major driver of churn — indicates dissatisfaction.")
-        elif "minutes" in feature.lower():
-            st.info(f" Usage pattern ({feature}) strongly affects churn - pricing or plan mismatch likely.")
-        elif "intl" in feature.lower():
-            st.info(f"International usage behavior ({feature}) influences churn - consider tailored plans.")
-        elif "cost" in feature.lower():
-            st.warning(f"Cost efficiency ({feature}) is a churn driver - customers may feel overcharged.")
+        f = row["feature"]
+        if "service" in f.lower():
+            st.warning(f" High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
+        elif "minutes" in f.lower():
+            st.info(f" Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
+        elif "intl" in f.lower():
+            st.info(f"International usage behavior ({f}) influences churn - consider tailored plans.")
+        elif "cost" in f.lower():
+            st.warning(f"Cost efficiency ({f}) is a churn driver - customers may feel overcharged.")
         else:
-            st.write(f"{feature} is an important driver of churn.")
-    
+            st.write(f"{f} is an important driver of churn.")
+
     # ----------------------------
     # DOWNLOAD RESULTS
     # ----------------------------
