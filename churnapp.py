@@ -1,4 +1,4 @@
-# churn_app.py
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,6 +7,7 @@ import boto3
 from io import BytesIO
 import shap
 import matplotlib.pyplot as plt
+import xgboost as xgb
 
 # ----------------------------
 # DATA PREPROCESSING FUNCTIONS
@@ -35,10 +36,10 @@ def preprocess(df, feature_names, scaler):
     return pd.DataFrame(scaled, columns=feature_names)
 
 # ----------------------------
-# LOAD MODEL, SCALER, FEATURE NAMES FROM R2
+# LOAD MODEL AND SCALER FROM R2
 # ----------------------------
 @st.cache_resource
-def load_model_assets():
+def load_model_and_scaler():
     try:
         R2_ENDPOINT = st.secrets["R2_ENDPOINT_URL"]
         R2_ACCESS_KEY = st.secrets["R2_ACCESS_KEY_ID"]
@@ -52,25 +53,28 @@ def load_model_assets():
             aws_secret_access_key=R2_SECRET_KEY
         )
 
-        # Load best model
-        model_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/best_model.pkl")
-        model = joblib.load(BytesIO(model_obj["Body"].read()))
-
+        # Load XGBoost model from JSON
+        model_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/best_model.json")
+        model = xgb.XGBClassifier()
+        model.load_model(BytesIO(model_obj["Body"].read()))
+        
         # Load scaler
         scaler_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/scaler.pkl")
         scaler = joblib.load(BytesIO(scaler_obj["Body"].read()))
 
-        # Feature names stored inside the model
-        feature_names = model.feature_names
+        # Load feature names stored inside model
+        feature_names_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/feature_names.pkl")
+        feature_names = joblib.load(BytesIO(feature_names_obj["Body"].read()))
+        model.feature_names = feature_names
 
         st.success("Model, scaler, and feature names loaded from R2")
         return model, scaler, feature_names, s3, R2_BUCKET
 
     except Exception as e:
-        st.error(f"Could not load model assets from R2: {e}")
+        st.warning(f"Could not load model assets from R2: {e}")
         st.stop()
 
-model, scaler, feature_names, s3, R2_BUCKET = load_model_assets()
+model, scaler, feature_names, s3, R2_BUCKET = load_model_and_scaler()
 
 # ----------------------------
 # LOAD DEFAULT TEST DATA FROM R2
@@ -83,7 +87,7 @@ def load_default_data():
         st.success("Default test dataset loaded from R2")
         return data_df
     except Exception as e:
-        st.error(f"Could not load default dataset: {e}")
+        st.warning(f"Could not load default dataset: {e}")
         st.stop()
 
 # ----------------------------
@@ -108,7 +112,7 @@ st.dataframe(raw_df.head())
 # ----------------------------
 if st.button("Run Prediction"):
     processed_df = preprocess(raw_df, feature_names, scaler)
-
+    
     preds = model.predict(processed_df)
     probs = model.predict_proba(processed_df)[:,1]
 
@@ -123,10 +127,11 @@ if st.button("Run Prediction"):
     # SHAP EXPLAINABILITY
     # ----------------------------
     st.subheader("Model Explainability (SHAP)")
-    processed_named = pd.DataFrame(processed_df, columns=feature_names)
 
-    explainer = shap.Explainer(model, processed_named)
-    shap_values = explainer(processed_named)
+    processed_df_named = pd.DataFrame(processed_df, columns=feature_names)
+
+    explainer = shap.Explainer(model, processed_df_named)
+    shap_values = explainer(processed_df_named)
 
     fig = plt.figure(figsize=(10,6))
     shap.plots.beeswarm(shap_values, show=False)
@@ -146,9 +151,9 @@ if st.button("Run Prediction"):
     for _, row in top3.iterrows():
         f = row["feature"]
         if "service" in f.lower():
-            st.warning(f"High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
+            st.warning(f" High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
         elif "minutes" in f.lower():
-            st.info(f"Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
+            st.info(f" Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
         elif "intl" in f.lower():
             st.info(f"International usage behavior ({f}) influences churn - consider tailored plans.")
         elif "cost" in f.lower():
