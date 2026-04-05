@@ -36,7 +36,7 @@ def preprocess(df, feature_names, scaler):
     return pd.DataFrame(scaled, columns=feature_names)
 
 # ----------------------------
-# LOAD MODEL AND SCALER FROM R2
+# LOAD MODEL, SCALER & FEATURE NAMES
 # ----------------------------
 @st.cache_resource
 def load_model_and_scaler():
@@ -53,16 +53,16 @@ def load_model_and_scaler():
             aws_secret_access_key=R2_SECRET_KEY
         )
 
-        # Load XGBoost model from JSON
+        # Load XGBoost model from JSON (faster & avoids pickle issues)
         model_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/best_model.json")
         model = xgb.XGBClassifier()
         model.load_model(BytesIO(model_obj["Body"].read()))
-        
+
         # Load scaler
         scaler_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/scaler.pkl")
         scaler = joblib.load(BytesIO(scaler_obj["Body"].read()))
 
-        # Load feature names stored inside model
+        # Load feature names
         feature_names_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/feature_names.pkl")
         feature_names = joblib.load(BytesIO(feature_names_obj["Body"].read()))
         model.feature_names = feature_names
@@ -77,14 +77,13 @@ def load_model_and_scaler():
 model, scaler, feature_names, s3, R2_BUCKET = load_model_and_scaler()
 
 # ----------------------------
-# LOAD DEFAULT TEST DATA FROM R2
+# LOAD DEFAULT DATA
 # ----------------------------
 @st.cache_data
 def load_default_data():
     try:
         obj = s3.get_object(Bucket=R2_BUCKET, Key="data/churn_test.csv")
         data_df = pd.read_csv(BytesIO(obj["Body"].read()))
-        st.success("Default test dataset loaded from R2")
         return data_df
     except Exception as e:
         st.warning(f"Could not load default dataset: {e}")
@@ -108,7 +107,7 @@ st.subheader("Preview Data")
 st.dataframe(raw_df.head())
 
 # ----------------------------
-# PREDICTION
+# RUN PREDICTION
 # ----------------------------
 if st.button("Run Prediction"):
     processed_df = preprocess(raw_df, feature_names, scaler)
@@ -124,15 +123,16 @@ if st.button("Run Prediction"):
     st.dataframe(results.head())
 
     # ----------------------------
-    # SHAP EXPLAINABILITY
+    # SHAP EXPLAINABILITY (cached for speed)
     # ----------------------------
+    @st.cache_resource
+    def compute_shap(model, df):
+        explainer = shap.Explainer(model, df)
+        return explainer(df)
+
+    shap_values = compute_shap(model, processed_df)
+
     st.subheader("Model Explainability (SHAP)")
-
-    processed_df_named = pd.DataFrame(processed_df, columns=feature_names)
-
-    explainer = shap.Explainer(model, processed_df_named)
-    shap_values = explainer(processed_df_named)
-
     fig = plt.figure(figsize=(10,6))
     shap.plots.beeswarm(shap_values, show=False)
     st.pyplot(fig)
@@ -151,9 +151,9 @@ if st.button("Run Prediction"):
     for _, row in top3.iterrows():
         f = row["feature"]
         if "service" in f.lower():
-            st.warning(f" High customer service interactions ({f}) are a major driver of churn - indicates dissatisfaction.")
+            st.warning(f"High customer service interactions ({f}) are a major driver of churn - indicates dissatisfaction.")
         elif "minutes" in f.lower():
-            st.info(f" Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
+            st.info(f"Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
         elif "intl" in f.lower():
             st.info(f"International usage behavior ({f}) influences churn - consider tailored plans.")
         elif "cost" in f.lower():
