@@ -117,7 +117,7 @@ if st.button("Run Prediction"):
     st.subheader("Prediction Results")
     st.dataframe(results.head())
 
-    # ----------------------------
+# ----------------------------
 # SHAP EXPLAINABILITY
 # ----------------------------
 st.subheader("Model Explainability (SHAP)")
@@ -133,18 +133,18 @@ fig = plt.figure(figsize=(10,6))
 shap.plots.beeswarm(shap_values, show=False)
 st.pyplot(fig)
 
-    # ----------------------------
-    # BUSINESS INTERPRETATION
-    # ----------------------------
-    st.subheader("Top 3 Drivers of Churn")
-    shap_importance = np.abs(shap_values.values).mean(axis=0)
-    importance_df = pd.DataFrame({
+# ----------------------------
+# BUSINESS INTERPRETATION
+# ----------------------------
+st.subheader("Top 3 Drivers of Churn")
+shap_importance = np.abs(shap_values.values).mean(axis=0)
+importance_df = pd.DataFrame({
         "feature": feature_names,
         "importance": shap_importance
     }).sort_values(by="importance", ascending=False)
 
-    top3 = importance_df.head(3)
-    for _, row in top3.iterrows():
+top3 = importance_df.head(3)
+for _, row in top3.iterrows():
         f = row["feature"]
         if "service" in f.lower():
             st.warning(f" High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
@@ -157,10 +157,10 @@ st.pyplot(fig)
         else:
             st.write(f"{f} is an important driver of churn.")
 
-    # ----------------------------
-    # DOWNLOAD RESULTS
-    # ----------------------------
-    st.download_button(
+# ----------------------------
+# DOWNLOAD RESULTS
+# ----------------------------
+st.download_button(
         label="Download Predictions",
         data=results.to_csv(index=False),
         file_name="churn_predictions.csv",
