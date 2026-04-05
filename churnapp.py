@@ -8,6 +8,7 @@ from io import BytesIO
 import shap
 import matplotlib.pyplot as plt
 import xgboost as xgb
+import tempfile
 
 # ----------------------------
 # DATA PREPROCESSING FUNCTIONS
@@ -53,10 +54,14 @@ def load_model_and_scaler():
             aws_secret_access_key=R2_SECRET_KEY
         )
 
-        # Load XGBoost model from JSON (faster & avoids pickle issues)
+        # Load XGBoost model from JSON using a temporary file
         model_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/best_model.json")
+        model_json = model_obj["Body"].read().decode("utf-8")
         model = xgb.XGBClassifier()
-        model.load_model(BytesIO(model_obj["Body"].read()))
+        with tempfile.NamedTemporaryFile(mode="w+", suffix=".json") as tmp:
+            tmp.write(model_json)
+            tmp.flush()
+            model.load_model(tmp.name)
 
         # Load scaler
         scaler_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/scaler.pkl")
@@ -71,7 +76,7 @@ def load_model_and_scaler():
         return model, scaler, feature_names, s3, R2_BUCKET
 
     except Exception as e:
-        st.warning(f"Could not load model assets from R2: {e}")
+        st.error(f"Could not load model assets from R2: {e}")
         st.stop()
 
 model, scaler, feature_names, s3, R2_BUCKET = load_model_and_scaler()
@@ -86,7 +91,7 @@ def load_default_data():
         data_df = pd.read_csv(BytesIO(obj["Body"].read()))
         return data_df
     except Exception as e:
-        st.warning(f"Could not load default dataset: {e}")
+        st.error(f"Could not load default dataset: {e}")
         st.stop()
 
 # ----------------------------
@@ -111,7 +116,7 @@ st.dataframe(raw_df.head())
 # ----------------------------
 if st.button("Run Prediction"):
     processed_df = preprocess(raw_df, feature_names, scaler)
-    
+
     preds = model.predict(processed_df)
     probs = model.predict_proba(processed_df)[:,1]
 
@@ -123,7 +128,7 @@ if st.button("Run Prediction"):
     st.dataframe(results.head())
 
     # ----------------------------
-    # SHAP EXPLAINABILITY (cached for speed)
+    # SHAP EXPLAINABILITY (cached)
     # ----------------------------
     @st.cache_resource
     def compute_shap(model, df):
