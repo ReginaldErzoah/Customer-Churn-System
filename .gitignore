@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+env/
+venv/
+ENV/
+.venv/
+*.env
+*.venv
+*.egg-info/
+dist/
+build/
+
+
+# Jupyter / Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*.nbconvert.ipynb
+
+
+# VS Code
+.vscode/
+*.code-workspace
+
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Terraform
+*.exe
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.terraform.tfvars
+crash.log
+
+# Docker / MinIO
+minio_data/
+localminio/.minio.sys/
+*.log
+*.pid
+docker-compose.override.yml
