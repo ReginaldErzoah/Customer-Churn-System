@@ -151,7 +151,7 @@ if st.button("Run Prediction"):
     for _, row in top3.iterrows():
         f = row["feature"]
         if "service" in f.lower():
-            st.warning(f" High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
+            st.warning(f" High customer service interactions ({f}) are a major driver of churn - indicates dissatisfaction.")
         elif "minutes" in f.lower():
             st.info(f" Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
         elif "intl" in f.lower():
