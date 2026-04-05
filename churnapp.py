@@ -1,4 +1,4 @@
-# app.py
+# churn_app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -35,10 +35,10 @@ def preprocess(df, feature_names, scaler):
     return pd.DataFrame(scaled, columns=feature_names)
 
 # ----------------------------
-# LOAD MODEL AND SCALER FROM R2
+# LOAD MODEL, SCALER, FEATURE NAMES FROM R2
 # ----------------------------
 @st.cache_resource
-def load_model_and_scaler():
+def load_model_assets():
     try:
         R2_ENDPOINT = st.secrets["R2_ENDPOINT_URL"]
         R2_ACCESS_KEY = st.secrets["R2_ACCESS_KEY_ID"]
@@ -52,7 +52,7 @@ def load_model_and_scaler():
             aws_secret_access_key=R2_SECRET_KEY
         )
 
-        # Load model
+        # Load best model
         model_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/best_model.pkl")
         model = joblib.load(BytesIO(model_obj["Body"].read()))
 
@@ -60,15 +60,17 @@ def load_model_and_scaler():
         scaler_obj = s3.get_object(Bucket=R2_BUCKET, Key="models/scaler.pkl")
         scaler = joblib.load(BytesIO(scaler_obj["Body"].read()))
 
-        st.success("Model and scaler loaded from R2")
-        return model, scaler, s3, R2_BUCKET
+        # Feature names stored inside the model
+        feature_names = model.feature_names
+
+        st.success("Model, scaler, and feature names loaded from R2")
+        return model, scaler, feature_names, s3, R2_BUCKET
 
     except Exception as e:
-        st.warning(f"Could not load model assets from R2: {e}")
+        st.error(f"Could not load model assets from R2: {e}")
         st.stop()
 
-model, scaler, s3, R2_BUCKET = load_model_and_scaler()
-feature_names = model.feature_names  # already stored inside the model
+model, scaler, feature_names, s3, R2_BUCKET = load_model_assets()
 
 # ----------------------------
 # LOAD DEFAULT TEST DATA FROM R2
@@ -81,7 +83,7 @@ def load_default_data():
         st.success("Default test dataset loaded from R2")
         return data_df
     except Exception as e:
-        st.warning(f"Could not load default dataset: {e}")
+        st.error(f"Could not load default dataset: {e}")
         st.stop()
 
 # ----------------------------
@@ -106,7 +108,7 @@ st.dataframe(raw_df.head())
 # ----------------------------
 if st.button("Run Prediction"):
     processed_df = preprocess(raw_df, feature_names, scaler)
-    
+
     preds = model.predict(processed_df)
     probs = model.predict_proba(processed_df)[:,1]
 
@@ -121,9 +123,10 @@ if st.button("Run Prediction"):
     # SHAP EXPLAINABILITY
     # ----------------------------
     st.subheader("Model Explainability (SHAP)")
-    processed_df_named = pd.DataFrame(processed_df, columns=feature_names)
-    explainer = shap.Explainer(model, processed_df_named)
-    shap_values = explainer(processed_df_named)
+    processed_named = pd.DataFrame(processed_df, columns=feature_names)
+
+    explainer = shap.Explainer(model, processed_named)
+    shap_values = explainer(processed_named)
 
     fig = plt.figure(figsize=(10,6))
     shap.plots.beeswarm(shap_values, show=False)
@@ -143,9 +146,9 @@ if st.button("Run Prediction"):
     for _, row in top3.iterrows():
         f = row["feature"]
         if "service" in f.lower():
-            st.warning(f" High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
+            st.warning(f"High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
         elif "minutes" in f.lower():
-            st.info(f" Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
+            st.info(f"Usage pattern ({f}) strongly affects churn - pricing or plan mismatch likely.")
         elif "intl" in f.lower():
             st.info(f"International usage behavior ({f}) influences churn - consider tailored plans.")
         elif "cost" in f.lower():
