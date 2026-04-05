@@ -68,7 +68,7 @@ def load_model_and_scaler():
         st.stop()
 
 model, scaler, s3, R2_BUCKET = load_model_and_scaler()
-feature_names = model.feature_names  # stored in model pickle
+feature_names = model.feature_names  # already stored inside the model
 
 # ----------------------------
 # LOAD DEFAULT TEST DATA FROM R2
@@ -117,34 +117,30 @@ if st.button("Run Prediction"):
     st.subheader("Prediction Results")
     st.dataframe(results.head())
 
-# ----------------------------
-# SHAP EXPLAINABILITY
-# ----------------------------
-st.subheader("Model Explainability (SHAP)")
+    # ----------------------------
+    # SHAP EXPLAINABILITY
+    # ----------------------------
+    st.subheader("Model Explainability (SHAP)")
+    processed_df_named = pd.DataFrame(processed_df, columns=feature_names)
+    explainer = shap.Explainer(model, processed_df_named)
+    shap_values = explainer(processed_df_named)
 
-processed_df_named = pd.DataFrame(processed_df, columns=feature_names)
+    fig = plt.figure(figsize=(10,6))
+    shap.plots.beeswarm(shap_values, show=False)
+    st.pyplot(fig)
 
-# Create SHAP explainer
-explainer = shap.Explainer(model, processed_df_named)
-shap_values = explainer(processed_df_named)
-
-# Plot beeswarm
-fig = plt.figure(figsize=(10,6))
-shap.plots.beeswarm(shap_values, show=False)
-st.pyplot(fig)
-
-# ----------------------------
-# BUSINESS INTERPRETATION
-# ----------------------------
-st.subheader("Top 3 Drivers of Churn")
-shap_importance = np.abs(shap_values.values).mean(axis=0)
-importance_df = pd.DataFrame({
+    # ----------------------------
+    # BUSINESS INTERPRETATION
+    # ----------------------------
+    st.subheader("Top 3 Drivers of Churn")
+    shap_importance = np.abs(shap_values.values).mean(axis=0)
+    importance_df = pd.DataFrame({
         "feature": feature_names,
         "importance": shap_importance
     }).sort_values(by="importance", ascending=False)
 
-top3 = importance_df.head(3)
-for _, row in top3.iterrows():
+    top3 = importance_df.head(3)
+    for _, row in top3.iterrows():
         f = row["feature"]
         if "service" in f.lower():
             st.warning(f" High customer service interactions ({f}) are a major driver of churn — indicates dissatisfaction.")
@@ -157,10 +153,10 @@ for _, row in top3.iterrows():
         else:
             st.write(f"{f} is an important driver of churn.")
 
-# ----------------------------
-# DOWNLOAD RESULTS
-# ----------------------------
-st.download_button(
+    # ----------------------------
+    # DOWNLOAD RESULTS
+    # ----------------------------
+    st.download_button(
         label="Download Predictions",
         data=results.to_csv(index=False),
         file_name="churn_predictions.csv",
